@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>FunBox — Race · Play · Connect</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0d12; --panel:#121821; --panel-2:#182130; --line:#26313f;
+    --text:#eef2f6; --dim:#8a97a8;
+    --accent:#e6483c; --accent-2:#ffb703; --accent-3:#29c7ac;
+    --good:#29c7ac; --bad:#e6483c;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI",Helvetica,Arial,sans-serif;
+    display:flex; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; user-select:none; }
+  #app{ position:relative; width:100%; max-width:1040px; aspect-ratio:16/10; background:var(--panel);
+    border-radius:10px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); border:1px solid var(--line); }
+  @media (max-width:700px){ #app{ aspect-ratio:9/16; max-width:480px; } }
+  .screen{ position:absolute; inset:0; display:none; flex-direction:column; }
+  .screen.active{ display:flex; }
+  .brand{ display:flex; align-items:baseline; gap:2px; font-weight:800; letter-spacing:1px; }
+  .brand .fun{ color:var(--text); } .brand .box{ color:var(--accent); }
+  .footer-credit{ position:absolute; bottom:10px; left:0; right:0; text-align:center; color:var(--dim); font-size:.68rem; }
+  button{ font-family:inherit; cursor:pointer; border:none; }
+  .btn{ padding:13px 18px; border-radius:8px; font-weight:700; font-size:.92rem; background:var(--accent); color:#fff;
+    transition:transform .08s ease, filter .15s ease; }
+  .btn:hover{ filter:brightness(1.08); } .btn:active{ transform:scale(.98); }
+  .btn.secondary{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+
+  #screen-loading{ align-items:center; justify-content:center; gap:22px;
+    background:radial-gradient(circle at 50% 20%, #1a2230 0%, #0a0d12 70%); }
+  .loading-track{ width:60%; max-width:320px; height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden; border:1px solid var(--line); }
+  .loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transition:width .1s linear; }
+  #loading-pct{ color:var(--dim); font-size:.85rem; letter-spacing:2px; }
+
+  #screen-menu{ align-items:center; justify-content:center; }
+  .card{ background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:24px; width:340px; max-height:92%; overflow:auto; }
+  .tabs{ display:flex; background:var(--bg); border-radius:8px; padding:4px; margin-bottom:16px; }
+  .tab{ flex:1; text-align:center; padding:9px; border-radius:6px; color:var(--dim); font-weight:700; font-size:.85rem; background:transparent; }
+  .tab.active{ background:var(--accent); color:#fff; }
+  label{ display:block; font-size:.7rem; letter-spacing:1px; color:var(--dim); margin:11px 0 6px; }
+  input[type=text], select{ width:100%; padding:10px 12px; border-radius:7px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:.9rem; }
+  #screen-menu .btn{ width:100%; margin-top:16px; }
+  .menu-error{ color:var(--bad); font-size:.75rem; margin-top:8px; min-height:1em; }
+  .server-note{ font-size:.65rem; color:var(--dim); margin-top:6px; line-height:1.4; }
+
+  #screen-lobby{ align-items:center; justify-content:center; }
+  .lobby-card{ background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:22px; width:380px; max-height:92%; overflow:auto; }
+  .lobby-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .room-code{ display:flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--line); padding:6px 10px; border-radius:7px; font-weight:800; letter-spacing:2px; cursor:pointer; }
+  .player-count{ color:var(--dim); font-size:.8rem; }
+  #player-list{ max-height:260px; overflow:auto; }
+  .player-row{ display:flex; align-items:center; justify-content:space-between; padding:8px 6px; border-bottom:1px solid var(--line); }
+  .player-row:last-child{ border-bottom:none; }
+  .player-name{ display:flex; align-items:center; gap:10px; font-weight:600; font-size:.87rem; }
+  .dot{ width:10px; height:10px; border-radius:50%; flex:none; }
+  .host-tag{ font-size:.6rem; color:var(--accent-2); font-weight:800; letter-spacing:1px; }
+  .status{ font-size:.7rem; font-weight:700; letter-spacing:.5px; }
+  .status.ready{ color:var(--good); } .status.notready{ color:var(--dim); }
+  .lobby-actions{ display:flex; gap:8px; margin-top:14px; }
+  .lobby-actions .btn{ flex:1; }
+
+  #screen-countdown{ align-items:center; justify-content:center; position:relative; background:linear-gradient(180deg,#2a3644,#0a0d12 60%); }
+  #countdown-num{ font-size:7rem; font-weight:900; color:#fff; text-shadow:0 0 40px rgba(230,72,60,.6); }
+  .vs-tag{ position:absolute; top:16px; font-size:.75rem; letter-spacing:2px; color:var(--dim); }
+
+  #screen-race{ background:#000; }
+  #raceCanvas{ width:100%; height:100%; display:block; }
+  .hud{ position:absolute; inset:0; pointer-events:none; font-variant-numeric:tabular-nums; }
+  .hud-top-left{ position:absolute; top:12px; left:12px; background:rgba(10,13,18,.72); border:1px solid var(--line); border-radius:8px; padding:8px 14px; }
+  .hud-top-left .lap-label{ font-size:.6rem; letter-spacing:2px; color:var(--dim); }
+  .hud-top-left .lap-value{ font-size:1.3rem; font-weight:800; }
+  .hud-top-right{ position:absolute; top:12px; right:12px; background:rgba(10,13,18,.72); border:1px solid var(--line); border-radius:8px; padding:8px 14px; text-align:right; }
+  .hud-time{ font-size:.95rem; font-weight:700; } .hud-best{ font-size:.66rem; color:var(--dim); margin-top:2px; }
+  .speedo{ position:absolute; bottom:16px; right:16px; background:rgba(10,13,18,.72); border:1px solid var(--line); border-radius:10px; padding:10px 16px; text-align:center; }
+  .speedo .val{ font-size:1.6rem; font-weight:900; color:var(--accent-2); } .speedo .unit{ font-size:.6rem; letter-spacing:2px; color:var(--dim); }
+  .minimap{ position:absolute; bottom:16px; left:16px; background:rgba(10,13,18,.72); border:1px solid var(--line); border-radius:8px; padding:6px; }
+  .board-toggle{ position:absolute; top:12px; left:50%; transform:translateX(-50%); pointer-events:auto; background:rgba(10,13,18,.72); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 12px; font-size:.68rem; letter-spacing:1px; font-weight:700; }
+  .board{ position:absolute; top:52px; left:50%; transform:translateX(-50%); background:rgba(10,13,18,.92); border:1px solid var(--line); border-radius:10px; padding:10px; min-width:250px; max-height:60%; overflow:auto; display:none; }
+  .board.show{ display:block; }
+  .board table{ width:100%; border-collapse:collapse; font-size:.76rem; }
+  .board th{ text-align:left; color:var(--dim); font-weight:600; font-size:.63rem; letter-spacing:1px; padding-bottom:6px; }
+  .board td{ padding:4px 4px; }
+  .board tr.me td{ color:#0a0d12; } .board tr.me{ background:var(--accent-2); border-radius:6px; }
+  .controls-hint{ position:absolute; bottom:16px; left:50%; transform:translateX(-50%); font-size:.63rem; color:var(--dim); background:rgba(10,13,18,.6); padding:5px 10px; border-radius:6px; }
+
+  #screen-finish{ align-items:center; justify-content:center; background:radial-gradient(circle at 50% 0%, #1a2230, #0a0d12 65%); }
+  .finish-card{ width:380px; max-height:92%; overflow:auto; }
+  .finish-title{ text-align:center; font-size:1.5rem; font-weight:900; margin-bottom:4px; letter-spacing:1px; }
+  .finish-sub{ text-align:center; color:var(--dim); font-size:.76rem; margin-bottom:16px; }
+  .result-row{ display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:8px; margin-bottom:6px; background:var(--panel-2); border:1px solid var(--line); }
+  .result-row.top1{ border-color:var(--accent-2); background:linear-gradient(90deg, rgba(255,183,3,.14), var(--panel-2)); }
+  .result-row.pending{ opacity:.6; }
+  .rank{ width:20px; text-align:center; font-weight:800; color:var(--dim); }
+  .medal{ font-size:1.05rem; }
+  .rname{ flex:1; font-weight:700; font-size:.86rem; }
+  .rtime{ font-family:Consolas,monospace; font-size:.78rem; color:var(--dim); }
+  .finish-actions{ display:flex; gap:10px; margin-top:14px; }
+  .finish-actions .btn{ flex:1; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 1. LOADING -->
+  <div class="screen active" id="screen-loading">
+    <div class="brand" style="font-size:2.4rem;"><span class="fun">FUN</span><span class="box">BOX</span></div>
+    <div style="color:var(--dim); font-size:.7rem; letter-spacing:4px; margin-top:-14px;">RACE · PLAY · CONNECT</div>
+    <div class="loading-track"><div class="loading-fill" id="loading-fill"></div></div>
+    <div id="loading-pct">Loading… 0%</div>
+    <div class="footer-credit">Recruitr™ &nbsp;·&nbsp; © Recruitr™ People Tech</div>
+  </div>
+
+  <!-- 2. JOIN / CREATE -->
+  <div class="screen" id="screen-menu">
+    <div class="card">
+      <div class="brand" style="font-size:1.5rem; justify-content:center; display:flex;"><span class="fun">FUN</span><span class="box">BOX</span></div>
+      <div style="text-align:center; color:var(--dim); font-size:.62rem; letter-spacing:3px; margin:2px 0 16px;">RACE · PLAY · CONNECT</div>
+
+      <label>Server URL</label>
+      <input type="text" id="server-url" placeholder="https://your-server.onrender.com">
+      <div class="server-note">This is the Render URL from step 2 of the deployment guide. Everyone racing together must enter the same server URL.</div>
+
+      <div class="tabs">
+        <button class="tab active" id="tab-create">Create room</button>
+        <button class="tab" id="tab-join">Join room</button>
+      </div>
+      <div id="pane-create">
+        <label>Your name</label>
+        <input type="text" id="name-input" placeholder="Your name" maxlength="16">
+        <label>Max players</label>
+        <select id="max-players">
+          <option value="12">12 (Recommended)</option>
+          <option value="8">8</option>
+          <option value="6">6</option>
+          <option value="4">4</option>
+          <option value="2">2</option>
+        </select>
+      </div>
+      <div id="pane-join" style="display:none;">
+        <label>Your name</label>
+        <input type="text" id="name-input-2" placeholder="Your name" maxlength="16">
+        <label>Room code</label>
+        <input type="text" id="join-code" placeholder="e.g. 7K3QF" maxlength="6">
+      </div>
+      <button class="btn" id="enter-lobby">Create room</button>
+      <div class="menu-error" id="menu-error"></div>
+    </div>
+    <div class="footer-credit">Recruitr™ &nbsp;·&nbsp; © Recruitr™ People Tech</div>
+  </div>
+
+  <!-- 3. LOBBY -->
+  <div class="screen" id="screen-lobby">
+    <div class="lobby-card">
+      <div class="brand" style="font-size:1.3rem; justify-content:center; display:flex;"><span class="fun">FUN</span><span class="box">BOX</span></div>
+      <div style="text-align:center; color:var(--dim); font-size:.6rem; letter-spacing:2px; margin:2px 0 16px;">RACE · PLAY · CONNECT</div>
+      <div class="lobby-head">
+        <div class="room-code" id="room-code-display" title="Click to copy">------ ⧉</div>
+        <div class="player-count" id="player-count">0 / 12</div>
+      </div>
+      <div id="player-list"></div>
+      <div class="lobby-actions">
+        <button class="btn secondary" id="ready-toggle">Ready up</button>
+        <button class="btn" id="lobby-start" disabled>Waiting…</button>
+      </div>
+    </div>
+    <div class="footer-credit" id="lobby-credit">Share the room code with your team</div>
+  </div>
+
+  <!-- 4. COUNTDOWN -->
+  <div class="screen" id="screen-countdown">
+    <div class="vs-tag">FUNBOX GP</div>
+    <div id="countdown-num">3</div>
+  </div>
+
+  <!-- 5/6. RACE -->
+  <div class="screen" id="screen-race">
+    <canvas id="raceCanvas"></canvas>
+    <div class="hud">
+      <div class="hud-top-left"><div class="lap-label">LAP</div><div class="lap-value" id="hud-lap">1/3</div></div>
+      <div class="hud-top-right"><div class="hud-time" id="hud-time">00:00.000</div><div class="hud-best" id="hud-best">BEST --:--.---</div></div>
+      <button class="board-toggle" id="board-toggle">LEADERBOARD</button>
+      <div class="board" id="board">
+        <table><thead><tr><th>#</th><th>Player</th><th>Lap</th><th>Time</th></tr></thead><tbody id="board-body"></tbody></table>
+      </div>
+      <div class="speedo"><div class="val" id="hud-speed">0</div><div class="unit">KM/H</div></div>
+      <canvas class="minimap" id="minimap" width="120" height="90"></canvas>
+      <div class="controls-hint">↑/W accelerate · ↓/S brake · ←→/A D steer</div>
+    </div>
+  </div>
+
+  <!-- 7. FINISH -->
+  <div class="screen" id="screen-finish">
+    <div class="finish-card">
+      <div class="finish-title">RACE FINISHED!</div>
+      <div class="finish-sub" id="finish-sub">Waiting for everyone to cross the line…</div>
+      <div id="finish-list"></div>
+      <div class="finish-actions">
+        <button class="btn" id="play-again">Play again</button>
+        <button class="btn secondary" id="back-lobby">Back to lobby</button>
+      </div>
+    </div>
+    <div class="footer-credit">Recruitr™ &nbsp;·&nbsp; © Recruitr™ People Tech</div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const TOTAL_LAPS = 3;
+
+  /* ---------------- screen management ---------------- */
+  const screens = {};
+  document.querySelectorAll(".screen").forEach(s=>screens[s.id]=s);
+  function show(id){ Object.values(screens).forEach(s=>s.classList.remove("active")); screens[id].classList.add("active"); }
+
+  /* ---------------- 1. loading ---------------- */
+  let pct = 0;
+  const fillEl = document.getElementById("loading-fill");
+  const pctEl = document.getElementById("loading-pct");
+  const loadTimer = setInterval(()=>{
+    pct += Math.random()*14 + 6;
+    if(pct >= 100){ pct = 100; clearInterval(loadTimer); setTimeout(()=>show("screen-menu"), 300); }
+    fillEl.style.width = pct+"%";
+    pctEl.textContent = "Loading… " + Math.floor(pct) + "%";
+  }, 180);
+
+  /* ---------------- networking state ---------------- */
+  let socket = null;
+  let me = null;             // {id,name,color,num}
+  let isHost = false;
+  let roomCode = "";
+  let lobbyPlayers = [];     // last lobby-update player list
+  let raceMeta = {};         // id -> {name,color,num} snapshot taken at race start
+  let raceResults = {};      // id -> finishTime (seconds)
+
+  function connectSocket(url){
+    return new Promise((resolve, reject)=>{
+      try{
+        const s = io(url, { transports:["websocket","polling"], reconnection:false, timeout:6000 });
+        let settled = false;
+        s.on("connect", ()=>{ settled = true; resolve(s); });
+        s.on("connect_error", (err)=>{ if(!settled){ settled = true; s.close(); reject(err); } });
+      }catch(e){ reject(e); }
+    });
+  }
+
+  function wireSocketEvents(){
+    socket.on("room-joined", ({code, you})=>{
+      me = you; roomCode = code;
+      document.getElementById("room-code-display").innerHTML = code + " ⧉";
+      show("screen-lobby");
+    });
+    socket.on("join-error", (msg)=>{ showMenuError(msg); setMenuBusy(false); });
+    socket.on("lobby-update", ({code, maxPlayers, players})=>{
+      roomCode = code; lobbyPlayers = players; window.__maxPlayers = maxPlayers;
+      const mine = players.find(p=>p.id === (me && me.id));
+      if(mine){ isHost = mine.isHost; me = Object.assign({}, me, mine); }
+      renderLobby();
+    });
+    socket.on("player-left", ({id})=>{ delete remoteCars[id]; });
+    socket.on("race-start", ({startAt})=> beginSyncedCountdown(startAt));
+    socket.on("car-update", (data)=>{
+      let c = remoteCars[data.id];
+      if(!c){ c = remoteCars[data.id] = newRemoteCar(data.id); }
+      c.tx = data.x; c.ty = data.y; c.tAngle = data.angle;
+      c.lap = data.lap; c.pathIdx = data.pathIdx; c.finished = data.finished;
+    });
+    socket.on("player-finished", ({id, time})=>{
+      raceResults[id] = time;
+      if(remoteCars[id]) remoteCars[id].finished = true;
+      if(screens["screen-finish"].classList.contains("active")) renderFinish();
+    });
+  }
+
+  function showMenuError(msg){ document.getElementById("menu-error").textContent = msg || ""; }
+
+  /* ---------------- 2. join/create ---------------- */
+  const tabCreate = document.getElementById("tab-create");
+  const tabJoin = document.getElementById("tab-join");
+  const paneCreate = document.getElementById("pane-create");
+  const paneJoin = document.getElementById("pane-join");
+  const enterBtn = document.getElementById("enter-lobby");
+  let mode = "create";
+  tabCreate.onclick = ()=>{ mode="create"; tabCreate.classList.add("active"); tabJoin.classList.remove("active"); paneCreate.style.display="block"; paneJoin.style.display="none"; enterBtn.textContent="Create room"; showMenuError(""); };
+  tabJoin.onclick   = ()=>{ mode="join"; tabJoin.classList.add("active"); tabCreate.classList.remove("active"); paneJoin.style.display="block"; paneCreate.style.display="none"; enterBtn.textContent="Join room"; showMenuError(""); };
+
+  function setMenuBusy(busy){ enterBtn.disabled = busy; enterBtn.textContent = busy ? "Connecting…" : (mode==="create" ? "Create room" : "Join room"); }
+
+  enterBtn.onclick = async ()=>{
+    showMenuError("");
+    const url = document.getElementById("server-url").value.trim().replace(/\/$/, "");
+    if(!url){ showMenuError("Enter the server URL first."); return; }
+    setMenuBusy(true);
+    try{
+      socket = await connectSocket(url);
+      wireSocketEvents();
+      if(mode === "create"){
+        const nm = document.getElementById("name-input").value.trim() || "Player";
+        const max = document.getElementById("max-players").value;
+        socket.emit("create-room", { name: nm, maxPlayers: max });
+      } else {
+        const nm = document.getElementById("name-input-2").value.trim() || "Player";
+        const code = document.getElementById("join-code").value.trim();
+        if(!code){ showMenuError("Enter a room code."); setMenuBusy(false); socket.close(); return; }
+        socket.emit("join-room", { name: nm, code });
+      }
+    }catch(e){
+      showMenuError("Couldn't reach that server. Check the URL and that it's deployed and awake.");
+      setMenuBusy(false);
+    }
+  };
+
+  /* ---------------- 3. lobby ---------------- */
+  const playerListEl = document.getElementById("player-list");
+  const playerCountEl = document.getElementById("player-count");
+  const lobbyStartBtn = document.getElementById("lobby-start");
+  const readyToggleBtn = document.getElementById("ready-toggle");
+
+  document.getElementById("room-code-display").onclick = ()=>{
+    if(!roomCode) return;
+    try{ navigator.clipboard.writeText(roomCode); }catch(e){}
+  };
+
+  readyToggleBtn.onclick = ()=>{ if(socket) socket.emit("toggle-ready"); };
+
+  function renderLobby(){
+    setMenuBusy(false);
+    const max = window.__maxPlayers || 12;
+    playerCountEl.textContent = lobbyPlayers.length + " / " + max;
+    playerListEl.innerHTML = "";
+    lobbyPlayers.forEach(p=>{
+      const ready = p.isHost || p.ready;
+      const row = document.createElement("div");
+      row.className = "player-row";
+      row.innerHTML = `
+        <div class="player-name"><span class="dot" style="background:${p.color}"></span>${p.name}${p.id===(me&&me.id) ? " (you)" : ""} ${p.isHost ? '<span class="host-tag">HOST</span>' : ""}</div>
+        <div class="status ${ready ? "ready":"notready"}">${ready ? "Ready" : "Not ready"}</div>`;
+      playerListEl.appendChild(row);
+    });
+    const mine = lobbyPlayers.find(p=>p.id === (me && me.id));
+    readyToggleBtn.textContent = mine && mine.ready ? "Not ready" : "Ready up";
+    readyToggleBtn.style.display = (mine && mine.isHost) ? "none" : "block";
+
+    const allReady = lobbyPlayers.every(p=> p.isHost || p.ready);
+    if(isHost){
+      lobbyStartBtn.style.display = "block";
+      lobbyStartBtn.disabled = !(allReady && lobbyPlayers.length >= 2);
+      lobbyStartBtn.textContent = lobbyPlayers.length < 2 ? "Need 2+ players" : (allReady ? "Start race" : "Waiting for players…");
+    } else {
+      lobbyStartBtn.style.display = "block";
+      lobbyStartBtn.disabled = true;
+      lobbyStartBtn.textContent = "Waiting for host…";
+    }
+  }
+  lobbyStartBtn.onclick = ()=>{ if(isHost && socket) socket.emit("start-race"); };
+
+  /* ---------------- 4. countdown ---------------- */
+  const countdownNum = document.getElementById("countdown-num");
+  let countdownIv = null;
+  function beginSyncedCountdown(startAt){
+    show("screen-countdown");
+    if(countdownIv) clearInterval(countdownIv);
+    countdownIv = setInterval(()=>{
+      const remaining = startAt - Date.now();
+      if(remaining <= 0){
+        clearInterval(countdownIv);
+        countdownNum.textContent = "GO!";
+        setTimeout(startRace, 250);
+      } else {
+        countdownNum.textContent = Math.ceil(remaining/1000);
+      }
+    }, 80);
+  }
+
+  /* ---------------- 5/6. RACE ---------------- */
+  const canvas = document.getElementById("raceCanvas");
+  const ctx = canvas.getContext("2d");
+  const mini = document.getElementById("minimap");
+  const miniCtx = mini.getContext("2d");
+  const hudLap = document.getElementById("hud-lap");
+  const hudTime = document.getElementById("hud-time");
+  const hudBest = document.getElementById("hud-best");
+  const hudSpeed = document.getElementById("hud-speed");
+  const boardToggle = document.getElementById("board-toggle");
+  const boardEl = document.getElementById("board");
+  const boardBody = document.getElementById("board-body");
+  boardToggle.onclick = ()=> boardEl.classList.toggle("show");
+
+  // ----- track definition (identical on every client - deterministic) -----
+  const CTRL = [
+    {x:150,y:460},{x:140,y:230},{x:300,y:90},{x:540,y:90},
+    {x:660,y:200},{x:600,y:330},{x:760,y:390},{x:890,y:300},
+    {x:890,y:480},{x:700,y:570},{x:390,y:570},{x:230,y:530}
+  ];
+  const TRACK_W = 74;
+  function cr(p0,p1,p2,p3,t){
+    const t2=t*t, t3=t2*t;
+    return {
+      x: 0.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3),
+      y: 0.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3)
+    };
+  }
+  const SAMPLES_PER_SEG = 22;
+  let PATH = [];
+  (function buildPath(){
+    const n = CTRL.length;
+    for(let i=0;i<n;i++){
+      const p0=CTRL[(i-1+n)%n], p1=CTRL[i], p2=CTRL[(i+1)%n], p3=CTRL[(i+2)%n];
+      for(let s=0;s<SAMPLES_PER_SEG;s++) PATH.push(cr(p0,p1,p2,p3, s/SAMPLES_PER_SEG));
+    }
+  })();
+  const N = PATH.length;
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function nearestIndex(x,y,hint){
+    let best=-1, bestD=Infinity;
+    const range = hint===undefined ? N : 40;
+    const start = hint===undefined ? 0 : hint-range;
+    const end = hint===undefined ? N : hint+range;
+    for(let k=start;k<end;k++){
+      const i = ((k%N)+N)%N;
+      const d = dist(PATH[i], {x,y});
+      if(d<bestD){ bestD=d; best=i; }
+    }
+    return {idx:best, d:bestD};
+  }
+
+  function startPose(num){
+    const start = PATH[0], next = PATH[3];
+    const ang = Math.atan2(next.y-start.y, next.x-start.x);
+    const perp = ang + Math.PI/2;
+    const laneOffset = (num - 6.5) * 15;
+    return { x: start.x + Math.cos(perp)*laneOffset, y: start.y + Math.sin(perp)*laneOffset, angle: ang };
+  }
+
+  const MAX_SPEED = 5.2, ACCEL = 0.085, BRAKE = 0.16, FRICTION = 0.985, TURN_RATE = 0.055;
+
+  let myCar = null;
+  const remoteCars = {}; // id -> render state
+
+  function newRemoteCar(id){
+    const info = raceMeta[id] || lobbyPlayers.find(p=>p.id===id) || { name:"Player", color:"#8a97a8", num:9 };
+    const pose = startPose(info.num || 9);
+    return { id, name: info.name, color: info.color, num: info.num,
+      x: pose.x, y: pose.y, angle: pose.angle, tx: pose.x, ty: pose.y, tAngle: pose.angle,
+      lap:0, pathIdx:0, finished:false };
+  }
+
+  const input = { up:false, down:false, left:false, right:false };
+  window.addEventListener("keydown", e=>{
+    if(["ArrowUp","w","W"].includes(e.key)) input.up=true;
+    if(["ArrowDown","s","S"].includes(e.key)) input.down=true;
+    if(["ArrowLeft","a","A"].includes(e.key)) input.left=true;
+    if(["ArrowRight","d","D"].includes(e.key)) input.right=true;
+  });
+  window.addEventListener("keyup", e=>{
+    if(["ArrowUp","w","W"].includes(e.key)) input.up=false;
+    if(["ArrowDown","s","S"].includes(e.key)) input.down=false;
+    if(["ArrowLeft","a","A"].includes(e.key)) input.left=false;
+    if(["ArrowRight","d","D"].includes(e.key)) input.right=false;
+  });
+
+  let raceStart = 0, raceRunning = false, rafId = null, lastFrame = 0, lastEmit = 0;
+
+  function startRace(){
+    raceMeta = {};
+    lobbyPlayers.forEach(p=> raceMeta[p.id] = p);
+    Object.keys(remoteCars).forEach(k=>delete remoteCars[k]);
+    lobbyPlayers.forEach(p=>{ if(p.id !== me.id) remoteCars[p.id] = newRemoteCar(p.id); });
+
+    const pose = startPose(me.num);
+    myCar = { x:pose.x, y:pose.y, angle:pose.angle, speed:0, lap:0, pathIdx:0, prevIdx:0,
+      finished:false, finishTime:null, lapStart:0, bestLap:null };
+    raceResults = {};
+
+    raceStart = performance.now();
+    raceRunning = true;
+    resizeCanvas();
+    show("screen-race");
+    boardEl.classList.remove("show");
+    if(rafId) cancelAnimationFrame(rafId);
+    lastFrame = performance.now();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function resizeCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * devicePixelRatio;
+    canvas.height = rect.height * devicePixelRatio;
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function loop(now){
+    const dt = Math.min(2, (now-lastFrame)/16.67);
+    lastFrame = now;
+    if(raceRunning) update(dt, now);
+    render();
+    if(raceRunning) rafId = requestAnimationFrame(loop);
+  }
+
+  function updateMe(dt){
+    const c = myCar;
+    if(input.up) c.speed += ACCEL*dt;
+    else if(input.down) c.speed -= BRAKE*dt;
+    c.speed *= Math.pow(FRICTION, dt);
+    c.speed = Math.max(-MAX_SPEED*0.45, Math.min(MAX_SPEED, c.speed));
+    const turnFactor = Math.min(1, Math.abs(c.speed)/1.4);
+    if(input.left) c.angle -= TURN_RATE*dt*turnFactor*(c.speed<0?-1:1);
+    if(input.right) c.angle += TURN_RATE*dt*turnFactor*(c.speed<0?-1:1);
+    c.x += Math.cos(c.angle)*c.speed*dt;
+    c.y += Math.sin(c.angle)*c.speed*dt;
+
+    const near = nearestIndex(c.x, c.y, c.pathIdx);
+    c.prevIdx = c.pathIdx; c.pathIdx = near.idx;
+    if(near.d > TRACK_W/2) c.speed *= Math.pow(0.9, dt);
+
+    if(c.prevIdx > N*0.85 && c.pathIdx < N*0.15){
+      const lapTime = (performance.now() - raceStart - c.lapStart)/1000;
+      if(c.bestLap===null || lapTime<c.bestLap) c.bestLap = lapTime;
+      c.lapStart = performance.now() - raceStart;
+      c.lap += 1;
+      if(c.lap >= TOTAL_LAPS && !c.finished){
+        c.finished = true;
+        c.finishTime = (performance.now() - raceStart)/1000;
+        if(socket) socket.emit("finished", { time: c.finishTime });
+        raceResults[me.id] = c.finishTime;
+        setTimeout(finishRace, 500);
+      }
+    }
+  }
+
+  function updateRemotes(dt){
+    Object.values(remoteCars).forEach(c=>{
+      c.x += (c.tx - c.x) * Math.min(1, 0.25*dt);
+      c.y += (c.ty - c.y) * Math.min(1, 0.25*dt);
+      let da = c.tAngle - c.angle;
+      while(da > Math.PI) da -= Math.PI*2;
+      while(da < -Math.PI) da += Math.PI*2;
+      c.angle += da * Math.min(1, 0.25*dt);
+    });
+  }
+
+  function update(dt, now){
+    updateMe(dt);
+    updateRemotes(dt);
+
+    if(now - lastEmit > 90 && socket){
+      lastEmit = now;
+      socket.emit("car-update", {
+        x: myCar.x, y: myCar.y, angle: myCar.angle,
+        lap: myCar.lap, pathIdx: myCar.pathIdx, finished: myCar.finished
+      });
+    }
+
+    const elapsed = (performance.now()-raceStart)/1000;
+    hudTime.textContent = fmt(elapsed);
+    hudLap.textContent = Math.min(myCar.lap+1, TOTAL_LAPS) + "/" + TOTAL_LAPS;
+    hudBest.textContent = "BEST " + (myCar.bestLap!==null ? fmt(myCar.bestLap) : "--:--.---");
+    hudSpeed.textContent = Math.max(0, Math.round(Math.abs(myCar.speed) * 34));
+    if(boardEl.classList.contains("show")) renderBoard(elapsed);
+  }
+
+  function fmt(sec){
+    const m = Math.floor(sec/60), s = Math.floor(sec%60), ms = Math.floor((sec-Math.floor(sec))*1000);
+    return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0")+"."+String(ms).padStart(3,"0");
+  }
+
+  function progressOfMe(){ return myCar.lap*N + myCar.pathIdx; }
+  function progressOfRemote(c){ return c.lap*N + c.pathIdx; }
+
+  function renderBoard(elapsed){
+    const rows = [{ id: me.id, name: me.name, isMe:true, prog: progressOfMe(), lap: myCar.lap, finished: myCar.finished, finishTime: myCar.finishTime }];
+    Object.values(remoteCars).forEach(c=> rows.push({ id:c.id, name:c.name, isMe:false, prog: progressOfRemote(c), lap:c.lap, finished:c.finished, finishTime: raceResults[c.id] }));
+    rows.sort((a,b)=> b.prog - a.prog);
+    boardBody.innerHTML = "";
+    rows.forEach((r,i)=>{
+      const tr = document.createElement("tr");
+      if(r.isMe) tr.className = "me";
+      const t = r.finished && r.finishTime!==undefined ? fmt(r.finishTime) : fmt(elapsed);
+      tr.innerHTML = `<td>${i+1}</td><td>${r.name}</td><td>${Math.min(r.lap + (r.finished?0:1), TOTAL_LAPS)}</td><td>${t}</td>`;
+      boardBody.appendChild(tr);
+    });
+  }
+
+  function render(){
+    const w = canvas.width, h = canvas.height;
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = "#132a18"; ctx.fillRect(0,0,w,h);
+
+    const zoom = Math.min(w,h)/560;
+    ctx.translate(w/2, h/2); ctx.scale(zoom, zoom); ctx.translate(-myCar.x, -myCar.y);
+
+    ctx.lineJoin="round"; ctx.lineCap="round";
+    ctx.beginPath();
+    PATH.forEach((p,i)=> i===0? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+    ctx.closePath();
+    ctx.strokeStyle = "#3a4652"; ctx.lineWidth = TRACK_W; ctx.stroke();
+
+    ctx.strokeStyle = "#525f6b"; ctx.lineWidth = TRACK_W+6;
+    ctx.globalCompositeOperation = "destination-over"; ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+
+    ctx.setLineDash([14,14]); ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+
+    const sp = PATH[0], sp2 = PATH[3];
+    const ang = Math.atan2(sp2.y-sp.y, sp2.x-sp.x);
+    const perp = ang+Math.PI/2;
+    ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(perp);
+    for(let i=-TRACK_W/2;i<TRACK_W/2;i+=10){
+      ctx.fillStyle = (Math.floor((i+TRACK_W/2)/10)%2===0) ? "#fff" : "#111";
+      ctx.fillRect(-5, i, 10, 10);
+    }
+    ctx.restore();
+
+    drawBanner(0);
+    drawBanner(Math.floor(N*0.5));
+
+    const allCars = [{x:myCar.x,y:myCar.y,angle:myCar.angle,color:me.color,name:me.name,num:me.num,isMe:true}]
+      .concat(Object.values(remoteCars).map(c=>({x:c.x,y:c.y,angle:c.angle,color:c.color,name:c.name,num:c.num,isMe:false})));
+
+    allCars.sort((a,b)=>a.y-b.y).forEach(c=>{
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.angle);
+      ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fillRect(-19,-13,35,26);
+
+      // rear wing - Recruitr branding
+      ctx.save();
+      ctx.translate(-16, 0);
+      ctx.fillStyle = "#eef2f6";
+      ctx.fillRect(-2.5, -9, 5, 18);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-2.5, -9, 5, 1.8);
+      ctx.fillRect(-2.5, 7.2, 5, 1.8);
+      ctx.save();
+      ctx.rotate(-Math.PI/2);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#0a0d12";
+      fitWingText("Recruitr™", 12);
+      ctx.restore();
+      ctx.restore();
+
+      // wheels - sit outside the hull so they stay visible from every angle
+      ctx.fillStyle = "#15181d";
+      ctx.fillRect(3,-12,6,5); ctx.fillRect(3,7,6,5);
+      ctx.fillRect(-10,-12,6,5); ctx.fillRect(-10,7,6,5);
+      ctx.fillStyle = "#4a5560";
+      ctx.fillRect(5,-10.4,2,1.8); ctx.fillRect(5,8.6,2,1.8);
+      ctx.fillRect(-8,-10.4,2,1.8); ctx.fillRect(-8,8.6,2,1.8);
+
+      // hull + nose
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-9,-7,15,14);
+      ctx.beginPath(); ctx.moveTo(6,-7); ctx.lineTo(14,0); ctx.lineTo(6,7); ctx.closePath(); ctx.fill();
+
+      // cockpit + car number
+      ctx.fillStyle = "#0a0d12"; ctx.fillRect(-6,-4,9,8);
+      ctx.fillStyle = "#eef2f6";
+      ctx.font = "bold 7px Segoe UI, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(String(c.num||""), -1.5, 2.4);
+      ctx.restore();
+
+      ctx.save(); ctx.translate(c.x, c.y-20);
+      ctx.font = "bold 11px Segoe UI, Arial"; ctx.textAlign="center";
+      ctx.fillStyle = "rgba(10,13,18,.75)";
+      const wtag = ctx.measureText(c.name).width+10;
+      ctx.fillRect(-wtag/2,-13,wtag,16);
+      ctx.fillStyle = c.isMe ? "#ffb703" : "#fff";
+      ctx.fillText(c.name, 0, -1);
+      ctx.restore();
+    });
+
+    ctx.restore();
+    drawMinimap(allCars);
+  }
+
+  function fitWingText(text, maxWidth){
+    let fs = 6;
+    ctx.font = "bold " + fs + "px Arial, sans-serif";
+    const w = ctx.measureText(text).width;
+    if(w > maxWidth) fs = Math.max(3, fs * (maxWidth / w) * 0.85);
+    ctx.font = "bold " + fs.toFixed(2) + "px Arial, sans-serif";
+    ctx.fillText(text, 0, fs*0.33);
+  }
+
+  function drawBanner(idx){
+    const p = PATH[idx], p2 = PATH[(idx+3)%N];
+    const ang = Math.atan2(p2.y-p.y, p2.x-p.x);
+    const perp = ang + Math.PI/2;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(perp);
+
+    const bw = TRACK_W + 34, bh = 22;
+    const liftY = -TRACK_W/2 - 34;
+
+    // support posts, grounded at the track edge
+    const postTop = liftY + bh/2;
+    const postHeight = (TRACK_W/2 + 10) - postTop;
+    ctx.fillStyle = "#20262c";
+    ctx.fillRect(-bw/2+6, postTop, 6, postHeight);
+    ctx.fillRect(bw/2-12, postTop, 6, postHeight);
+
+    ctx.translate(0, liftY);
+
+    // panel body
+    ctx.fillStyle = "#0d1117";
+    ctx.fillRect(-bw/2, -bh/2, bw, bh);
+    ctx.strokeStyle = "#e6483c";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-bw/2, -bh/2, bw, bh);
+
+    // amber trim along the top edge
+    ctx.fillStyle = "#ffb703";
+    ctx.fillRect(-bw/2, -bh/2, bw, 3);
+
+    // checkered strip along the bottom edge
+    const chk = 6;
+    const cols = Math.ceil(bw/chk);
+    for(let i=0;i<cols;i++){
+      ctx.fillStyle = i%2===0 ? "#eef2f6" : "#0d1117";
+      ctx.fillRect(-bw/2 + i*chk, bh/2-4, chk, 4);
+    }
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#eef2f6";
+    ctx.font = "bold 12px Segoe UI, Arial";
+    ctx.fillText("Recruitr™", 0, 3);
+
+    ctx.restore();
+  }
+
+  function drawMinimap(allCars){
+    const mw = mini.width, mh = mini.height;
+    miniCtx.clearRect(0,0,mw,mh);
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    PATH.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minY=Math.min(minY,p.y); maxY=Math.max(maxY,p.y); });
+    const pad=8, s = Math.min((mw-pad*2)/(maxX-minX), (mh-pad*2)/(maxY-minY));
+    const tx = x=> pad+(x-minX)*s, ty = y=> pad+(y-minY)*s;
+    miniCtx.beginPath();
+    PATH.forEach((p,i)=> i===0? miniCtx.moveTo(tx(p.x),ty(p.y)) : miniCtx.lineTo(tx(p.x),ty(p.y)));
+    miniCtx.closePath(); miniCtx.strokeStyle="#5a6673"; miniCtx.lineWidth=4; miniCtx.stroke();
+    allCars.forEach(c=>{
+      miniCtx.beginPath(); miniCtx.arc(tx(c.x), ty(c.y), c.isMe?4:3, 0, Math.PI*2);
+      miniCtx.fillStyle = c.color; miniCtx.fill();
+      if(c.isMe){ miniCtx.strokeStyle="#fff"; miniCtx.lineWidth=1; miniCtx.stroke(); }
+    });
+  }
+
+  /* ---------------- 7. finish ---------------- */
+  function finishRace(){
+    raceRunning = false;
+    renderFinish();
+    show("screen-finish");
+  }
+
+  function renderFinish(){
+    const rows = [{ id: me.id, name: me.name+" (you)", finished: !!raceResults[me.id], time: raceResults[me.id] }]
+      .concat(Object.values(raceMeta).filter(p=>p.id!==me.id).map(p=>({ id:p.id, name:p.name, finished: raceResults[p.id]!==undefined, time: raceResults[p.id] })));
+
+    const finishedRows = rows.filter(r=>r.finished).sort((a,b)=>a.time-b.time);
+    const pendingRows = rows.filter(r=>!r.finished);
+
+    const listEl = document.getElementById("finish-list");
+    listEl.innerHTML = "";
+    const medals = ["🏆","🥈","🥉"];
+    finishedRows.forEach((r,i)=>{
+      const row = document.createElement("div");
+      row.className = "result-row" + (i===0 ? " top1":"");
+      row.innerHTML = `<div class="rank">${i<3 ? "" : (i+1)}</div><div class="medal">${i<3 ? medals[i] : ""}</div>
+        <div class="rname">${r.name}</div><div class="rtime">${fmt(r.time)}</div>`;
+      listEl.appendChild(row);
+    });
+    pendingRows.forEach(r=>{
+      const row = document.createElement("div");
+      row.className = "result-row pending";
+      row.innerHTML = `<div class="rank"></div><div class="medal"></div><div class="rname">${r.name}</div><div class="rtime">Racing…</div>`;
+      listEl.appendChild(row);
+    });
+
+    document.getElementById("finish-sub").textContent = pendingRows.length
+      ? "Waiting for everyone to cross the line…"
+      : (finishedRows[0] && finishedRows[0].name.includes("(you)") ? "You won the race!" : (finishedRows[0] ? finishedRows[0].name + " takes the win." : ""));
+  }
+
+  document.getElementById("play-again").onclick = ()=>{ if(socket) socket.emit("back-to-lobby"); show("screen-lobby"); };
+  document.getElementById("back-lobby").onclick = ()=>{ if(socket) socket.emit("back-to-lobby"); show("screen-lobby"); };
+
+})();
+</script>
+</body>
+</html>
